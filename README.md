@@ -178,9 +178,28 @@ Once `terraform apply` finishes, inspect the output values:
 
 ---
 
+## 🚀 Continuous Deployment (CD) Pipeline with Azure OIDC
+
+The repository includes a production-grade CD pipeline in [`.github/workflows/cd.yml`](file:///f:/Devops%20Insider/Pipelines/Axion_system/.github/workflows/cd.yml) utilizing **Azure Workload Identity Federation (OIDC)** for passwordless, secretless authentication.
+
+### How Azure OIDC Federation Works:
+1. Azure DevOps requests a short-lived OIDC ID token from Microsoft Entra ID (Azure AD) via the Service Connection.
+2. The pipeline's `AzureCLI@2` task automatically injects `ARM_OIDC_TOKEN`, `ARM_CLIENT_ID`, `ARM_TENANT_ID`, and `ARM_SUBSCRIPTION_ID`.
+3. The Terraform `azurerm` provider validates the federated credential without needing client secrets or stored passwords.
+
+### Setting up the Service Connection in Azure DevOps:
+1. Go to **Project Settings** ➔ **Service Connections** ➔ **New Service Connection**.
+2. Select **Azure Resource Manager** ➔ **Workload Identity federation (automatic)**.
+3. Choose your Subscription and Resource Group.
+4. Name the connection `Azure-OIDC-Connection` (or match the `azureServiceConnection` variable in `cd.yml`).
+5. Check **Grant access permission to all pipelines** and save.
+
+---
+
 ## 🧹 Teardown / Cleanup
 
 To delete all resources and avoid incurring Azure charges:
 ```bash
 terraform destroy -auto-approve
 ```
+

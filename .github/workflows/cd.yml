@@ -1,0 +1,122 @@
+name: Axion System CD Pipeline (Azure Deployment)
+
+trigger: none # Set to trigger on 'main' or 'master' if automated CD on push is desired
+# trigger:
+#   branches:
+#     include:
+#       - main
+#       - master
+
+parameters:
+  - name: autoApprove
+    displayName: 'Auto-approve Terraform Apply'
+    type: boolean
+    default: true
+
+variables:
+  # Replace with the exact name of your Azure DevOps ARM Service Connection
+  # configured with Workload Identity Federation (OIDC)
+  azureServiceConnection: 'IntelAuth'
+
+pool:
+  name: 'IntelAgent' # Self-hosted Windows agent
+
+stages:
+  # ============================================================================
+  # STAGE 1: TERRAFORM PLAN
+  # ============================================================================
+  - stage: Terraform_Plan_Stage
+    displayName: 'Plan Infrastructure'
+    jobs:
+      - job: Terraform_Plan
+        displayName: 'Terraform Plan (OIDC Auth)'
+        steps:
+          - task: AzureCLI@2
+            displayName: 'Authenticate with OIDC & Generate Plan'
+            inputs:
+              azureSubscription: '$(azureServiceConnection)'
+              scriptType: 'ps'
+              scriptLocation: 'inlineScript'
+              addSpnToEnvironment: true
+              inlineScript: |
+                Write-Host "=========================================================="
+                Write-Host "Configuring Azure OIDC Authentication for Terraform..."
+                Write-Host "=========================================================="
+
+                # Set Terraform AzureRM provider OIDC environment variables
+                $env:ARM_USE_OIDC        = "true"
+                $env:ARM_CLIENT_ID       = $env:servicePrincipalId
+                $env:ARM_TENANT_ID       = $env:tenantId
+                $env:ARM_OIDC_TOKEN      = $env:idToken
+                $env:ARM_SUBSCRIPTION_ID = (az account show --query id -o tsv).Trim()
+
+                Write-Host "Authenticated as Client ID: $env:ARM_CLIENT_ID"
+                Write-Host "Using Subscription ID: $env:ARM_SUBSCRIPTION_ID"
+
+                Write-Host "##[section]Initializing Terraform..."
+                terraform init
+
+                Write-Host "##[section]Creating Execution Plan (tfplan)..."
+                terraform plan -out=tfplan -input=false
+
+          - task: PublishPipelineArtifact@1
+            displayName: 'Publish Terraform Plan Artifact'
+            inputs:
+              targetPath: '$(System.DefaultWorkingDirectory)/tfplan'
+              artifact: 'tfplan'
+
+  # ============================================================================
+  # STAGE 2: TERRAFORM APPLY
+  # ============================================================================
+  - stage: Terraform_Apply_Stage
+    displayName: 'Deploy Infrastructure'
+    dependsOn: Terraform_Plan_Stage
+    condition: succeeded()
+    jobs:
+      - deployment: Terraform_Apply
+        displayName: 'Terraform Apply (OIDC Auth)'
+        environment: 'Axion-Production' # Configure Approvals & Checks in ADO Environment if needed
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+
+                - task: DownloadPipelineArtifact@2
+                  displayName: 'Download Terraform Plan Artifact'
+                  inputs:
+                    artifact: 'tfplan'
+                    targetPath: '$(System.DefaultWorkingDirectory)'
+
+                - task: AzureCLI@2
+                  displayName: 'Authenticate with OIDC & Apply Infrastructure'
+                  inputs:
+                    azureSubscription: '$(azureServiceConnection)'
+                    scriptType: 'ps'
+                    scriptLocation: 'inlineScript'
+                    addSpnToEnvironment: true
+                    inlineScript: |
+                      Write-Host "=========================================================="
+                      Write-Host "Configuring Azure OIDC Authentication for Terraform..."
+                      Write-Host "=========================================================="
+
+                      # Set Terraform AzureRM provider OIDC environment variables
+                      $env:ARM_USE_OIDC        = "true"
+                      $env:ARM_CLIENT_ID       = $env:servicePrincipalId
+                      $env:ARM_TENANT_ID       = $env:tenantId
+                      $env:ARM_OIDC_TOKEN      = $env:idToken
+                      $env:ARM_SUBSCRIPTION_ID = (az account show --query id -o tsv).Trim()
+
+                      Write-Host "Authenticated as Client ID: $env:ARM_CLIENT_ID"
+                      Write-Host "Using Subscription ID: $env:ARM_SUBSCRIPTION_ID"
+
+                      Write-Host "##[section]Re-initializing Terraform..."
+                      terraform init
+
+                      Write-Host "##[section]Applying Execution Plan to Azure..."
+                      terraform apply -input=false tfplan
+
+                      Write-Host "=========================================================="
+                      Write-Host "Deployment Completed Successfully! Querying Outputs..."
+                      Write-Host "=========================================================="
+                      terraform output -no-color
