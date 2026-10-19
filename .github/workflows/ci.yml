@@ -4,37 +4,45 @@ trigger:
   branches:
     include:
       - main
+      - master
 pr:
   branches:
     include:
       - main
+      - master
 
 pool:
   vmImage: 'ubuntu-latest'
-  
+
 stages:
   - stage: CI
-    displayName: 'Contineous Integration'
+    displayName: 'Continuous Integration'
     jobs:
-      - job: Terraform Init
-        displayName: 'Terraform Init'
+      - job: Terraform_CI
+        displayName: 'Terraform Lint & Validate'
         steps:
-        - script: terraform init
+          - script: |
+              echo "Checking Terraform formatting..."
+              terraform fmt -check -recursive
+            displayName: 'Terraform Format Check'
 
-      - job: Terraform fmt
-        displayName: 'Terraform Formate'
-        steps:
-        - script: terraform fmt
+          - script: |
+              echo "Initializing Terraform..."
+              terraform init -backend=false
+            displayName: 'Terraform Init'
 
-      - job: Terraform Validate
-        displayName: 'Terraform Validate'
-        steps:  
-        - script: terraform validate
+          - script: |
+              echo "Validating Terraform code..."
+              terraform validate
+            displayName: 'Terraform Validate'
 
-      - job: TFLint
-        displayName: 'TFLint'
-        steps:
-        - script: |
-            tflint --init
-            tflint --recursive
-
+          - script: |
+              echo "Installing TFLint..."
+              if ! command -v tflint &> /dev/null; then
+                curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
+              fi
+              echo "Running TFLint..."
+              tflint --version
+              tflint --init
+              tflint --recursive
+            displayName: 'TFLint'
