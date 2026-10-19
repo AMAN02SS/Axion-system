@@ -34,7 +34,7 @@ stages:
       - job: TFLint
         displayName: 'TFLint'
         steps:
-        - scrpt: |
+        - script: |
             tflint --init
             tflint --recursive
 
