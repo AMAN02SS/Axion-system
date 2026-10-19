@@ -21,28 +21,26 @@ stages:
       - job: Terraform_CI
         displayName: 'Terraform Lint & Validate'
         steps:
-          - script: |
-              echo "Checking Terraform formatting..."
+          - powershell: |
+              Write-Host "Checking Terraform formatting..."
               terraform fmt -check -recursive
             displayName: 'Terraform Format Check'
 
-          - script: |
-              echo "Initializing Terraform..."
+          - powershell: |
+              Write-Host "Initializing Terraform..."
               terraform init -backend=false
             displayName: 'Terraform Init'
 
-          - script: |
-              echo "Validating Terraform code..."
+          - powershell: |
+              Write-Host "Validating Terraform code..."
               terraform validate
             displayName: 'Terraform Validate'
 
-          - script: |
-              echo "Installing TFLint..."
-              if ! command -v tflint &> /dev/null; then
-                curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
-              fi
-              echo "Running TFLint..."
+          - powershell: |
+              Write-Host "Checking TFLint version..."
               tflint --version
+              Write-Host "Initializing TFLint plugins..."
               tflint --init
+              Write-Host "Running TFLint recursively..."
               tflint --recursive
             displayName: 'TFLint'
