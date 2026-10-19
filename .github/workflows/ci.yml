@@ -1,0 +1,40 @@
+name: Axion System CI pipeline
+
+trigger:
+  branches:
+    include:
+      - main
+pr:
+  branches:
+    include:
+      - main
+
+pool:
+  vmImage: 'ubuntu-latest'
+  
+stages:
+  - stage: CI
+    displayName: 'Contineous Integration'
+    jobs:
+      - job: Terraform Init
+        displayName: 'Terraform Init'
+        steps:
+        - script: terraform init
+
+      - job: Terraform fmt
+        displayName: 'Terraform Formate'
+        steps:
+        - script: terraform fmt
+
+      - job: Terraform Validate
+        displayName: 'Terraform Validate'
+        steps:  
+        - script: terraform validate
+
+      - job: TFLint
+        displayName: 'TFLint'
+        steps:
+        - scrpt: |
+            tflint --init
+            tflint --recursive
+
