@@ -37,18 +37,19 @@ resource "azurerm_private_dns_zone_virtual_network_link" "pg_dns_link" {
 
 # Azure Database for PostgreSQL Flexible Server (PaaS)
 resource "azurerm_postgresql_flexible_server" "postgres" {
-  name                   = "psql-${var.project_name}-${var.environment}-${random_string.suffix.result}"
-  resource_group_name    = var.resource_group_name
-  location               = var.location
-  version                = var.postgres_version
-  delegated_subnet_id    = var.delegated_subnet_id
-  private_dns_zone_id    = azurerm_private_dns_zone.pg_dns_zone.id
-  administrator_login    = var.admin_username
-  administrator_password = local.resolved_admin_password
-  sku_name               = var.sku_name
-  storage_mb             = var.storage_mb
-  backup_retention_days  = 7
-  tags                   = var.tags
+  name                          = "psql-${var.project_name}-${var.environment}-${random_string.suffix.result}"
+  resource_group_name           = var.resource_group_name
+  location                      = var.location
+  version                       = var.postgres_version
+  delegated_subnet_id           = var.delegated_subnet_id
+  private_dns_zone_id           = azurerm_private_dns_zone.pg_dns_zone.id
+  administrator_login           = var.admin_username
+  administrator_password        = local.resolved_admin_password
+  sku_name                      = var.sku_name
+  storage_mb                    = var.storage_mb
+  backup_retention_days         = 7
+  public_network_access_enabled = false
+  tags                          = var.tags
 
   # Ensure Private DNS Zone VNet Link is active before server creation
   depends_on = [azurerm_private_dns_zone_virtual_network_link.pg_dns_link]
