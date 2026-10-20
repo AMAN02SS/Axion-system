@@ -41,10 +41,9 @@ pipeline {
         TF_VAR_environment = "${params.ENVIRONMENT ?: 'dev'}"
         PLAN_FILE           = 'tfplan'
         
-        // Optional: Azure Service Principal credentials ID configured in:
-        // Jenkins -> Manage Jenkins -> Credentials -> System -> Global credentials
-        // Set this ID to match your Jenkins credential ID (e.g., 'azure-sp' or 'azure-credentials')
-        AZURE_CREDENTIAL_ID = 'azure-sp-credentials'
+        // Default credential IDs configured in Jenkins Credentials store:
+        AZURE_CREDENTIAL_ID      = 'azure-sp-credentials'
+        AZURE_OIDC_CREDENTIAL_ID = 'azure-oidc-token'
     }
 
     stages {
@@ -258,7 +257,46 @@ def runCmd(String command) {
  * 5. Ambient environment variables
  */
 def withAzureEnv(Closure body) {
-    // Strategy 1: Individual Jenkins Secret Text credentials
+    // Strategy 1: Jenkins OpenID Connect (OIDC) ID Token
+    try {
+        withCredentials([
+            string(credentialsId: env.AZURE_OIDC_CREDENTIAL_ID, variable: 'AZ_OIDC_TOKEN')
+        ]) {
+            echo "🔑 Authenticated using Jenkins OpenID Connect (OIDC) ID token (${env.AZURE_OIDC_CREDENTIAL_ID})."
+            // Also attempt to read Client, Tenant, Subscription IDs from Jenkins Credentials if defined
+            try {
+                withCredentials([
+                    string(credentialsId: 'ARM_CLIENT_ID', variable: 'AZ_CLIENT_ID'),
+                    string(credentialsId: 'ARM_SUBSCRIPTION_ID', variable: 'AZ_SUBSCRIPTION_ID'),
+                    string(credentialsId: 'ARM_TENANT_ID', variable: 'AZ_TENANT_ID')
+                ]) {
+                    withEnv([
+                        "ARM_USE_OIDC=true",
+                        "ARM_OIDC_TOKEN=${AZ_OIDC_TOKEN}",
+                        "ARM_CLIENT_ID=${AZ_CLIENT_ID}",
+                        "ARM_SUBSCRIPTION_ID=${AZ_SUBSCRIPTION_ID}",
+                        "ARM_TENANT_ID=${AZ_TENANT_ID}"
+                    ]) {
+                        body()
+                        return
+                    }
+                }
+            } catch (Throwable t_ids) {
+                // If not in individual credentials, use OIDC token with Jenkins environment variables
+                withEnv([
+                    "ARM_USE_OIDC=true",
+                    "ARM_OIDC_TOKEN=${AZ_OIDC_TOKEN}"
+                ]) {
+                    body()
+                    return
+                }
+            }
+        }
+    } catch (Throwable t_oidc) {
+        // Continue to Strategy 2
+    }
+
+    // Strategy 2: Individual Jenkins Secret Text credentials
     try {
         withCredentials([
             string(credentialsId: 'ARM_CLIENT_ID', variable: 'AZ_CLIENT_ID'),
