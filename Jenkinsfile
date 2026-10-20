@@ -250,12 +250,39 @@ def runCmd(String command) {
 }
 
 /**
- * Wraps execution within Azure credentials if available in Jenkins Credential Store,
- * otherwise falls back gracefully to ambient environment variables or Azure CLI session.
+ * Wraps execution within Azure credentials using multiple fallback strategies:
+ * 1. Individual Secret Text credentials (ARM_CLIENT_ID, ARM_CLIENT_SECRET, ARM_SUBSCRIPTION_ID, ARM_TENANT_ID)
+ * 2. Azure Service Principal credential (AZURE_CREDENTIAL_ID)
+ * 3. Username/Password credential (AZURE_CREDENTIAL_ID)
+ * 4. Automatic Azure CLI session detection (bridges Windows Service accounts to user's .azure folder)
+ * 5. Ambient environment variables
  */
 def withAzureEnv(Closure body) {
+    // Strategy 1: Individual Jenkins Secret Text credentials
     try {
-        // Supports Azure Service Principal credentials (ClientId, ClientSecret, TenantId, SubscriptionId)
+        withCredentials([
+            string(credentialsId: 'ARM_CLIENT_ID', variable: 'AZ_CLIENT_ID'),
+            string(credentialsId: 'ARM_CLIENT_SECRET', variable: 'AZ_CLIENT_SECRET'),
+            string(credentialsId: 'ARM_SUBSCRIPTION_ID', variable: 'AZ_SUBSCRIPTION_ID'),
+            string(credentialsId: 'ARM_TENANT_ID', variable: 'AZ_TENANT_ID')
+        ]) {
+            withEnv([
+                "ARM_CLIENT_ID=${AZ_CLIENT_ID}",
+                "ARM_CLIENT_SECRET=${AZ_CLIENT_SECRET}",
+                "ARM_SUBSCRIPTION_ID=${AZ_SUBSCRIPTION_ID}",
+                "ARM_TENANT_ID=${AZ_TENANT_ID}"
+            ]) {
+                echo "🔑 Authenticated using Jenkins Secret Text credentials (ARM_*)."
+                body()
+                return
+            }
+        }
+    } catch (Throwable t1) {
+        // Continue to Strategy 2
+    }
+
+    // Strategy 2: Azure Service Principal plugin credential
+    try {
         withCredentials([
             azureServicePrincipal(
                 credentialsId: env.AZURE_CREDENTIAL_ID,
@@ -265,24 +292,60 @@ def withAzureEnv(Closure body) {
                 tenantIdVariable: 'ARM_TENANT_ID'
             )
         ]) {
+            echo "🔑 Authenticated using Azure Service Principal credential (${env.AZURE_CREDENTIAL_ID})."
             body()
+            return
         }
-    } catch (Throwable e) {
-        // If the azureServicePrincipal credential plugin/id is not found, try usernamePassword or ambient environment
-        try {
-            withCredentials([
-                usernamePassword(
-                    credentialsId: env.AZURE_CREDENTIAL_ID,
-                    usernameVariable: 'ARM_CLIENT_ID',
-                    passwordVariable: 'ARM_CLIENT_SECRET'
-                )
-            ]) {
-                body()
-            }
-        } catch (Throwable ex) {
-            // Fall back to ambient environment variables or pre-authenticated Azure CLI agent
-            echo "ℹ️ Using ambient agent Azure credentials or pre-configured environment."
+    } catch (Throwable t2) {
+        // Continue to Strategy 3
+    }
+
+    // Strategy 3: Username with Password credential
+    try {
+        withCredentials([
+            usernamePassword(
+                credentialsId: env.AZURE_CREDENTIAL_ID,
+                usernameVariable: 'ARM_CLIENT_ID',
+                passwordVariable: 'ARM_CLIENT_SECRET'
+            )
+        ]) {
+            echo "🔑 Authenticated using Username/Password credential (${env.AZURE_CREDENTIAL_ID})."
             body()
+            return
+        }
+    } catch (Throwable t3) {
+        // Continue to Strategy 4
+    }
+
+    // Strategy 4: Windows Service Account Profile Discovery
+    // When Jenkins runs as a Windows Service (LocalSystem), bridge to existing user's az login cache
+    if (!isUnix()) {
+        try {
+            def userAzureDir = powershell(
+                returnStdout: true,
+                script: '''
+                    $found = Get-ChildItem "C:\\Users" -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+                        Join-Path $_.FullName ".azure\\azureProfile.json"
+                    } | Where-Object { Test-Path $_ } | Select-Object -First 1
+                    if ($found) {
+                        Write-Output (Split-Path $found -Parent)
+                    }
+                '''
+            ).trim()
+
+            if (userAzureDir && userAzureDir.length() > 0) {
+                echo "ℹ️ Discovered active Azure CLI profile at: ${userAzureDir}. Setting AZURE_CONFIG_DIR..."
+                withEnv(["AZURE_CONFIG_DIR=${userAzureDir}"]) {
+                    body()
+                    return
+                }
+            }
+        } catch (Throwable t4) {
+            // Continue to ambient fallback
         }
     }
+
+    // Strategy 5: Ambient agent environment variables or pre-configured Azure CLI
+    echo "ℹ️ Using ambient agent Azure credentials or pre-configured environment."
+    body()
 }
