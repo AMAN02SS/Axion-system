@@ -9,7 +9,6 @@ pipeline {
     options {
         timeout(time: 2, unit: 'HOURS')
         timestamps()
-        ansiColor('xterm')
         disableConcurrentBuilds()
         buildDiscarder(logRotator(numToKeepStr: '30', artifactNumToKeepStr: '10'))
     }
@@ -137,8 +136,8 @@ pipeline {
                             runCmd("terraform plan -out=${env.PLAN_FILE} -input=false")
                         }
 
-                        // Stash the plan and module state so it's guaranteed identical during Apply
-                        stash name: 'terraform-plan', includes: "${env.PLAN_FILE}, .terraform/**, .terraform.lock.hcl"
+                        // Stash the plan file so it is guaranteed identical during Apply
+                        stash name: 'terraform-plan', includes: "${env.PLAN_FILE}"
 
                         // Archive plan artifact in Jenkins build history
                         archiveArtifacts artifacts: "${env.PLAN_FILE}", fingerprint: true, allowEmptyArchive: true
@@ -166,7 +165,7 @@ pipeline {
                             message: "Approve '${params.ACTION.toUpperCase()}' on Axion System [${params.ENVIRONMENT.toUpperCase()}]?",
                             ok: "Approve & Execute ${params.ACTION.toUpperCase()}",
                             parameters: [
-                                text(
+                                string(
                                     name: 'APPROVAL_NOTES',
                                     defaultValue: 'Approved for deployment after reviewing plan artifact.',
                                     description: 'Reviewer comments or ticket reference'
@@ -268,7 +267,7 @@ def withAzureEnv(Closure body) {
         ]) {
             body()
         }
-    } catch (Exception e) {
+    } catch (Throwable e) {
         // If the azureServicePrincipal credential plugin/id is not found, try usernamePassword or ambient environment
         try {
             withCredentials([
@@ -280,7 +279,7 @@ def withAzureEnv(Closure body) {
             ]) {
                 body()
             }
-        } catch (Exception ex) {
+        } catch (Throwable ex) {
             // Fall back to ambient environment variables or pre-authenticated Azure CLI agent
             echo "ℹ️ Using ambient agent Azure credentials or pre-configured environment."
             body()
